@@ -15,7 +15,8 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
-            'line_module_b_home_service = line_module_b_controler.line_module_b_home_service:main'
+            'line_module_b_home_service = line_module_b_controler.line_module_b_home_service:main',
+            'line_module_b_controler = line_module_b_controler.line_module_b_controler:main'
         ],
     },
 )
