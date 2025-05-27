@@ -8,10 +8,10 @@ from pymodbus.client.sync import ModbusSerialClient
 
 # === 零点位置（实测） ===
 ZERO_POSITIONS = {
-    'X1': -7658001*1.05,
-    'X2': -545689*1.7,
-    'Z':  5812000*0.97,
-    'Y':  -2140820*1.1
+    'X1': -7696697,
+    'X2': -597383,
+    'Z':  5778817,
+    'Y':  -2168266 
 }
 
 # === 对应串口设备 ===
@@ -24,7 +24,7 @@ PORTS = {
 
 RESOLUTION = 131072
 SCREW_PITCH = 10.0
-TOLERANCE_MM = 1.0
+TOLERANCE_MM = 5.0
 TIMEOUT_SEC = 60
 SPEED_RPM = -600
 
@@ -62,6 +62,20 @@ class BModuleHomeService(Node):
         if value >= 0x80000000:
             value -= 0x100000000
         return value
+
+    def read_i16(self, client, addr):
+        rr = client.read_holding_registers(addr, 1, unit=1)
+        if rr.isError():
+            return None
+        val = rr.registers[0]
+        return val - 0x10000 if val >= 0x8000 else val
+
+    def read_u32(self, client, addr):
+        rr = client.read_holding_registers(addr, 2, unit=1)
+        if rr.isError() or not hasattr(rr, 'registers'):
+            return None
+        low, high = rr.registers[0], rr.registers[1]
+        return (high << 16) | low
 
     def write_u16(self, client, addr, val):
         client.write_register(addr, val, unit=1)
@@ -114,8 +128,9 @@ class BModuleHomeService(Node):
             self.write_u16(client, 771, 1)
             self.get_logger().info(f"[{axis}] 🚦 开始回零")
 
+            delta_mm_1 = float('inf')
+            delta_mm_2 = float('inf')
             start_time = time.time()
-            last_pos = None
 
             while True:
                 if time.time() - start_time > TIMEOUT_SEC:
@@ -123,27 +138,27 @@ class BModuleHomeService(Node):
                     self.write_u16(client, 1539, 0)
                     break
 
-                abs_pos = self.read_i32(client, 2893)
-                if abs_pos is None:
+                abs_pos_1 = self.read_i32(client, 2893)
+                if abs_pos_1 is None:
                     continue
 
-                delta_pulse = abs(abs_pos - zero_pos)
-                delta_mm = delta_pulse / RESOLUTION * SCREW_PITCH
-                self.get_logger().info(f"[{axis}] 📍 位置: {abs_pos}, 偏差: {delta_mm:.4f} mm")
+                h0b70 = self.read_i16(client, 2886)
+                h0b71 = self.read_u32(client, 2887)
+                if h0b70 is None or h0b71 is None:
+                    continue
 
-                if last_pos is not None:
-                    if last_pos < zero_pos and abs_pos >= zero_pos:
-                        self.get_logger().warn(f"[{axis}] ⛔ 跳过目标位置")
-                        self.write_u16(client, 1539, 0)
-                        break
+                computed_pos = h0b70 * RESOLUTION + h0b71
+                delta_mm_2 = min(delta_mm_2, abs(computed_pos - zero_pos) / RESOLUTION * SCREW_PITCH)
+                delta_mm_1 = min(delta_mm_1, abs(abs_pos_1 - zero_pos) / RESOLUTION * SCREW_PITCH)
 
-                if delta_mm < TOLERANCE_MM:
+                self.get_logger().info(f"[{axis}] 📍 H0B_77: {abs_pos_1}, H0B_70+71: {computed_pos}, Δ1: {delta_mm_1:.4f} mm, Δ2: {delta_mm_2:.4f} mm")
+
+                if delta_mm_1 < TOLERANCE_MM or delta_mm_2 < TOLERANCE_MM:
                     self.get_logger().info(f"[{axis}] ✅ 回零完成")
                     self.write_u16(client, 1539, 0)
                     break
 
-                last_pos = abs_pos
-                time.sleep(0.05)
+                time.sleep(0.01)
 
             # 恢复工作力矩
             self.write_checked(client, 1801, 200, "恢复 H07_09", axis)
