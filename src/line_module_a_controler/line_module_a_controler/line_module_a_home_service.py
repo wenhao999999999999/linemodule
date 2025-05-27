@@ -8,9 +8,9 @@ import threading
 
 class LineModuleAHomeService(Node):
     def __init__(self):
-        super().__init__('line_module_home_service')
+        super().__init__('a_module_home_service')
 
-        self.srv = self.create_service(Trigger, '/line_module_touch_home', self.callback)
+        self.srv = self.create_service(Trigger, '/line_module_a_home', self.callback)
         self.get_logger().info("🟢 四轴回零服务已启动（A模组 / 单圈绝对值编码器）")
 
         self.axis_ports = {

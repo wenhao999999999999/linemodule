@@ -8,6 +8,8 @@ setup(
     packages=[package_name],
     data_files=[
         ('share/' + package_name, ['package.xml']),
+        ('share/ament_index/resource_index/packages', ['resource/line_module_a_controler']),
+        ('share/line_module_a_controler', ['package.xml']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
