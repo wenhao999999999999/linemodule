@@ -4,10 +4,17 @@ import threading
 
 # === 参数配置 ===
 PORTS = {
-    'BY': '/dev/line_module_by',
-    'BZ': '/dev/line_module_bz',
+    # === B 模组 ===
     'BX1': '/dev/line_module_bx1',
-    'BX2': '/dev/line_module_bx2'
+    'BX2': '/dev/line_module_bx2',
+    'BY':  '/dev/line_module_by',
+    'BZ':  '/dev/line_module_bz',
+
+    # === A 模组 ===
+    'AX1': '/dev/line_module_ax1',
+    'AX2': '/dev/line_module_ax2',
+    'AY':  '/dev/line_module_ay',
+    'AZ':  '/dev/line_module_az',
 }
 BAUDRATE = 57600
 MODBUS_UNIT = 1

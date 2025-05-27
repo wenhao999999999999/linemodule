@@ -100,7 +100,7 @@ class LineModuleAController(Node):
             raise RuntimeError("❌ 所有串口连接失败")
 
     def call_home_service_sync(self):
-        client = self.create_client(Trigger, '/line_module_home_service')
+        client = self.create_client(Trigger, '/line_module_a_home')
         start_time = time.time()
         while not client.wait_for_service(timeout_sec=1.0):
             if time.time() - start_time > 15:
@@ -123,18 +123,20 @@ class LineModuleAController(Node):
             raw = rr.registers[0]
             return raw - 0x10000 if raw >= 0x8000 else raw
 
-        def read_u31(addr):
+        def read_u32(addr):
             rr = client.read_holding_registers(addr, 2, unit=1)
             if rr.isError() or not hasattr(rr, 'registers'):
                 return None
-            return (rr.registers[0] << 16 | rr.registers[1]) & 0x7FFFFFFF
+            low = rr.registers[0]
+            high = rr.registers[1]
+            return (high << 16) | low
 
         h0b70 = read_i16(2886)
-        h0b71 = read_u31(2887)
+        h0b71 = read_u32(2887)
         if h0b70 is None or h0b71 is None:
             return None
 
-        circle = h0b70 + h0b71 / 2147483647
+        circle = h0b70 + h0b71 / 131072
         self.last_valid_circle[axis] = circle
         return circle
 
@@ -161,12 +163,13 @@ class LineModuleAController(Node):
                 continue
             current_circle = self.get_circle_fraction('ax1')
             target_circle = target_mm / self.screw_pitch_mm + self.zero_circle['ax1']
-            self.get_logger().info(f"[AX] 当前圈数: {current_circle:.5f}, 目标圈数: {target_circle:.5f}")
             pos_mm = self.get_position_mm('ax1')
             error = pos_mm - target_mm
+            self.get_logger().info(f"[AX] 当前: {pos_mm:.2f} mm, 目标: {target_mm:.2f} mm, 误差: {error:.2f} mm")
             if abs(error) <= 0.1:
                 self.write_speed('ax1', 0)
                 self.write_speed('ax2', 0)
+                self.get_logger().info("[AX] ✅ 已到达目标位置")
                 with self.lock_ax:
                     self.target_mm['ax'] = None
                     self.pid_controllers['ax'].reset()
@@ -186,11 +189,12 @@ class LineModuleAController(Node):
                 continue
             current_circle = self.get_circle_fraction(axis)
             target_circle = target_mm / self.screw_pitch_mm + self.zero_circle[axis]
-            self.get_logger().info(f"[{axis.upper()}] 当前圈数: {current_circle:.5f}, 目标圈数: {target_circle:.5f}")
             pos_mm = self.get_position_mm(axis)
             error = pos_mm - target_mm
+            self.get_logger().info(f"[{axis.upper()}] 当前: {pos_mm:.2f} mm, 目标: {target_mm:.2f} mm, 误差: {error:.2f} mm")
             if abs(error) <= 0.1:
                 self.write_speed(axis, 0)
+                self.get_logger().info(f"[{axis.upper()}] ✅ 已到达目标位置")
                 with lock:
                     self.target_mm[axis] = None
                 self.pid_controllers[axis].reset()

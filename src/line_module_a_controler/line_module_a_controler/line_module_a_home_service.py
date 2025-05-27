@@ -30,12 +30,10 @@ class LineModuleAHomeService(Node):
         self.axis_results = {}
         self.axis_connected = {}
         self.nominal_torque = {
-            'homing': 100,   # 回零力矩（20%）
-            'working': 200  # 工作力矩（100%）
+            'homing': 100,
+            'working': 200
         }
 
-
-        # 回零原点圈数记录（退出用）
         self.zero_circle = {}
         self.screw_pitch_mm = 10.0
 
@@ -57,37 +55,36 @@ class LineModuleAHomeService(Node):
                     return None
                 raw = rr.registers[0]
                 return raw - 0x10000 if raw >= 0x8000 else raw
-            
+
             def read_i32(addr):
                 rr = client.read_holding_registers(addr, 2, unit=1)
                 if rr.isError() or not hasattr(rr, 'registers'):
                     return None
-                high, low = rr.registers[0], rr.registers[1]
+                low, high = rr.registers[0], rr.registers[1]
                 value = (high << 16) | low
-                # 转为有符号 32 位整数
                 if value >= 0x80000000:
                     value -= 0x100000000
                 return value
 
-            
             def read_u16(addr):
                 rr = client.read_holding_registers(addr, 1, unit=1)
                 if rr.isError() or not hasattr(rr, 'registers'):
                     return None
                 return rr.registers[0]
 
-            def read_u31(addr):
+            def read_u32(addr):
                 rr = client.read_holding_registers(addr, 2, unit=1)
                 if rr.isError() or not hasattr(rr, 'registers'):
                     return None
-                return (rr.registers[0] << 16 | rr.registers[1]) & 0x7FFFFFFF
+                low, high = rr.registers[0], rr.registers[1]
+                return (high << 16) | low
 
             def get_circle_fraction():
                 h0b70 = read_i16(2886)
-                h0b71 = read_u31(2887)
+                h0b71 = read_u32(2887)
                 if h0b70 is None or h0b71 is None:
                     return None
-                return h0b70 + h0b71 / 2147483647
+                return h0b70 + h0b71 / 131072
 
             def get_position_mm():
                 circle = get_circle_fraction()
@@ -114,10 +111,8 @@ class LineModuleAHomeService(Node):
 
             rpm = self.axis_home_speed_rpm[axis_name]
             ok = (
-                #限制回零时的内部转矩
                 write_checked(1801, self.nominal_torque['homing'], f"H07_09 = {self.nominal_torque['homing']} → 电机{self.nominal_torque['homing'] * 0.001}倍正内部转矩") and
                 write_checked(1802, self.nominal_torque['homing'], f"H07_10 = {self.nominal_torque['homing']} → 电机{self.nominal_torque['homing'] * 0.001}倍负内部转矩") and
-
                 write_checked(512, 0, "H02_00 = 0 → 速度模式") and
                 write_checked(770, 1, "H03_02 = 1 → DI1伺服使能") and
                 write_checked(771, 0, "H03_03 = 0 → DI1正逻辑") and
@@ -137,67 +132,11 @@ class LineModuleAHomeService(Node):
             time.sleep(1)
 
             prev_curr = prev_torque = prev_speed = None
-            # while True:
-            #     speed = read_i16(2816) #转速
-            #     self.get_logger().info(f"[{axis_name}] 当前转速：{speed:.1f}rpm")
-            #     curr = read_i16(2840) * 0.01 #相电流
-            #     self.get_logger().info(f"[{axis_name}] 当前电流：{curr:.1f}A")
-            #     torque = read_i16(2818) * 0.1 #转矩
-            #     self.get_logger().info(f"[{axis_name}] 当前转矩：{torque:.1f}%")
-            #     triggered = False
 
-            #     #回零判据1
-            #     # if speed is not None and abs((speed - prev_speed)/prev_speed) > 0.2:
-            #     #     triggered = True
-            #     # if curr is not None and prev_curr is not None and abs((curr - prev_curr)/prev_curr) > 0.2:
-            #     #     triggered = True
-            #     # if torque is not None and prev_torque is not None and abs((torque - prev_torque)/prev_torque) > 0.2:
-            #     #     triggered = True
-            #     # # if speed is not None and prev_speed is not None:
-            #     # #     delta = prev_speed - speed
-            #     # #     if prev_speed < -20 and delta > abs(prev_speed) * 0.5:
-            #     # #         triggered = True
-
-            #     #回零判据2
-            #     def is_significant_change(current, previous, threshold_ratio):
-            #         if current is None or previous is None or abs(previous) < 1e-6:
-            #             return False
-            #         return abs((current - previous) / previous) > threshold_ratio
-
-            #     # 替代触发判断
-            #     if torque is not None and prev_torque is not None and speed is not None and prev_speed is not None:
-            #         if is_significant_change(torque, prev_torque, 0.8):
-            #             self.get_logger().info(f"[{axis_name}] ⏹ 判据1触发：转矩突然变化 {prev_torque:.1f} → {torque:.1f} %")
-            #             triggered = True
-
-            #     if curr is not None and prev_curr is not None:
-            #         if is_significant_change(curr, prev_curr, 0.8):
-            #             self.get_logger().info(f"[{axis_name}] ⏹ 判据2触发：电流变化率超过阈值 {prev_curr:.1f} → {curr:.1f} A")
-            #             triggered = True
-
-            #     if speed is not None and abs(speed) <= 90:
-            #         self.get_logger().info(f"[{axis_name}] ⏹ 判据3触发：速度过慢 speed={speed} rpm")
-            #         triggered = True
-
-                        
-
-
-            #     prev_curr = curr
-            #     prev_torque = torque
-            #     prev_speed = speed
-
-            #     if triggered:
-            #         write_u16(1539, 0) #到达原点停止运动
-            #         break
-
-            #     time.sleep(0.01)
-
-            # 初始：是否完成基准采样
             sample_ready = False
-            sample_start_time = time.time()
             speed_window = []
             STABLE_LEN = 10
-            SPEED_THRESHOLD = 10  # rpm 波动小于此值视为稳定
+            SPEED_THRESHOLD = 10
 
             while True:
                 speed = read_i16(2816)
@@ -205,30 +144,23 @@ class LineModuleAHomeService(Node):
                 torque = read_i16(2818) * 0.1
                 triggered = False
 
-                #如果从起始位置回零
                 if abs(torque + self.nominal_torque['homing'] * 0.1) <= 0.01:
                     self.get_logger().info(f"[{axis_name}] ⏹ 原点回零判据触发：转矩满载 {torque} %")
                     triggered = True
-                
+
                 if triggered:
                     break
-                    
 
-                #实时输出当前判据值
                 self.get_logger().info(f"[{axis_name}] 当前转速：{speed:.1f}rpm")
                 self.get_logger().info(f"[{axis_name}] 当前电流：{curr:.2f}A")
                 self.get_logger().info(f"[{axis_name}] 当前转矩：{torque:.2f}%")
 
-                # === 1️⃣ 检查是否完成稳定采样 ===
                 if not sample_ready:
                     speed_window.append(speed)
                     if len(speed_window) > STABLE_LEN:
                         speed_window.pop(0)
 
-                    if (
-                        len(speed_window) == STABLE_LEN and
-                        max(speed_window) - min(speed_window) < SPEED_THRESHOLD
-                    ):
+                    if len(speed_window) == STABLE_LEN and max(speed_window) - min(speed_window) < SPEED_THRESHOLD:
                         prev_speed = speed
                         prev_torque = torque
                         prev_curr = curr
@@ -236,9 +168,8 @@ class LineModuleAHomeService(Node):
                         self.get_logger().info(f"[{axis_name}] 🎯 采样完成：speed={prev_speed:.1f}rpm, torque={prev_torque:.1f}%, curr={prev_curr:.2f}A")
                     else:
                         time.sleep(0.01)
-                        continue  # 未采样完成时跳过判据判断
+                        continue
 
-                # === 2️⃣ 判据判断（使用 stable 采样的 prev_*）===
                 def is_significant_change(current, previous, threshold_ratio):
                     if current is None or previous is None or abs(previous) < 1e-6:
                         return False
@@ -261,13 +192,10 @@ class LineModuleAHomeService(Node):
 
                 time.sleep(0.01)
 
-
-            # ⏬ 慢速退出归零区（反方向）
             write_u16(1539, 15)
             time.sleep(1.5)
             write_u16(1539, 0)
 
-            # 记录当前圈数作为原点参考
             curr_circle = get_circle_fraction()
             if curr_circle is not None:
                 self.zero_circle[axis_name] = curr_circle
@@ -276,9 +204,8 @@ class LineModuleAHomeService(Node):
 
             self.axis_results[axis_name] = f"✅ 回零成功：A模组轴 {axis_name.upper()}"
 
-            #设置工作力矩
-            write_checked(1801, self.nominal_torque['working'], f"H07_09 = {self.nominal_torque['working']} → 电机{self.nominal_torque['working'] * 0.001}倍正内部转矩") 
-            write_checked(1802, self.nominal_torque['working'], f"H07_10 = {self.nominal_torque['working']} → 电机{self.nominal_torque['working'] * 0.001}倍负内部转矩") 
+            write_checked(1801, self.nominal_torque['working'], f"H07_09 = {self.nominal_torque['working']} → 电机{self.nominal_torque['working'] * 0.001}倍正内部转矩")
+            write_checked(1802, self.nominal_torque['working'], f"H07_10 = {self.nominal_torque['working']} → 电机{self.nominal_torque['working'] * 0.001}倍负内部转矩")
 
             self.get_logger().info(f"[{axis_name}] ✅ 回零逻辑执行完毕")
 
@@ -309,7 +236,7 @@ class LineModuleAHomeService(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = LineModuleHomeService()
+    node = LineModuleAHomeService()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
