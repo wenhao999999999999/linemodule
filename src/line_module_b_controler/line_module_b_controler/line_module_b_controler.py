@@ -151,6 +151,7 @@ class LineModuleBController(Node):
                 with self.lock_bx:
                     self.target_mm['bx'] = None
                 self.pid_controllers['bx'].reset()
+                self.get_logger().info(f"✅ BX 已到达目标位置 {target_mm:.2f} mm")
                 continue
             speed = int(self.pid_controllers['bx'].compute(error))
             self.write_speed('bx1', speed)
@@ -172,6 +173,7 @@ class LineModuleBController(Node):
                 with lock:
                     self.target_mm[axis] = None
                 self.pid_controllers[axis].reset()
+                self.get_logger().info(f"✅ {axis.upper()} 已到达目标位置 {target_mm:.2f} mm")
                 continue
             speed = int(self.pid_controllers[axis].compute(error))
             self.write_speed(axis, speed)
