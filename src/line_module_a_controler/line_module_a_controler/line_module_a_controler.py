@@ -25,26 +25,17 @@ class PIDController:
         self.prev_error = 0.0
 
     def compute(self, error):
-        # 计算微分项
         derivative = (error - self.prev_error) / self.dt
-
-        # 更新积分项（加入积分限幅防止饱和）
         self.integral += error * self.dt
         self.integral = max(min(self.integral, self.max_integral), self.min_integral)
-
-        # PID 输出
         output = self.kp * error + self.ki * self.integral + self.kd * derivative
         output = max(min(output, self.max_output), self.min_output)
-
-        # 更新历史误差
         self.prev_error = error
         return output
 
-
-
-class LineModuleController(Node):
+class LineModuleAController(Node):
     def __init__(self):
-        super().__init__('line_module_controller')
+        super().__init__('line_module_a_controller')
 
         self.screw_pitch_mm = 10.0
         self.speed_max = 1200
@@ -55,10 +46,10 @@ class LineModuleController(Node):
         self.lock_az = threading.Lock()
 
         self.axis_ports = {
-            'az': '/dev/line_module_az',
-            'ay': '/dev/line_module_ay',
             'ax1': '/dev/line_module_ax1',
             'ax2': '/dev/line_module_ax2',
+            'ay':  '/dev/line_module_ay',
+            'az':  '/dev/line_module_az',
         }
 
         self.axis_clients = {}
@@ -78,13 +69,12 @@ class LineModuleController(Node):
                 raise RuntimeError(f"读取编码器圈数失败: {axis}")
             self.zero_circle[axis] = circle
             self.last_valid_circle[axis] = circle
-            self.get_logger().info(f"[{axis}] 回零原点圈数 = {circle:.5f}")
+            self.get_logger().info(f"[Zero] {axis} 原点圈数 = {circle:.5f}")
 
         self.create_subscription(Float32MultiArray, '/target_position_array', self.listener_callback_all, 10)
         self.pub_position_string = self.create_publisher(String, '/line_module_A/position_mm', 10)
         self.create_timer(0.2, self.publish_position_all)
 
-        #初始化PID控制器
         self.pid_controllers = defaultdict(lambda: PIDController(
             kp=8.0, ki=0.3, kd=0.1, dt=0.01,
             output_limits=(-self.speed_max, self.speed_max),
@@ -100,17 +90,17 @@ class LineModuleController(Node):
             if client.connect():
                 self.axis_clients[axis] = client
                 self.axis_connected[axis] = True
-                self.get_logger().info(f"✅ 成功连接串口：{axis} → {port}")
+                self.get_logger().info(f"✅ 成功连接 {axis} → {port}")
             else:
                 self.axis_clients[axis] = None
                 self.axis_connected[axis] = False
-                self.get_logger().error(f"❌ 串口连接失败：{axis} → {port}")
+                self.get_logger().error(f"❌ 串口连接失败 {axis} → {port}")
 
         if not any(self.axis_connected.values()):
             raise RuntimeError("❌ 所有串口连接失败")
 
     def call_home_service_sync(self):
-        client = self.create_client(Trigger, '/line_module_touch_home')
+        client = self.create_client(Trigger, '/line_module_home_service')
         start_time = time.time()
         while not client.wait_for_service(timeout_sec=1.0):
             if time.time() - start_time > 15:
@@ -179,15 +169,9 @@ class LineModuleController(Node):
                 self.write_speed('ax2', 0)
                 with self.lock_ax:
                     self.target_mm['ax'] = None
-                    self.pid_controllers['ax'].reset()  # ✅ 重置 PID 状态
+                    self.pid_controllers['ax'].reset()
                 continue
-            #P
-            # speed = int(max(min(error * self.speed_gain, self.speed_max), -self.speed_max))
-
-            #PID
-            pid = self.pid_controllers['ax']  # 获取 AX 联动 PID 控制器
-            speed = int(pid.compute(error))   # 计算 PID 输出
-
+            speed = int(self.pid_controllers['ax'].compute(error))
             self.write_speed('ax1', speed)
             self.write_speed('ax2', speed)
             time.sleep(0.01)
@@ -209,14 +193,9 @@ class LineModuleController(Node):
                 self.write_speed(axis, 0)
                 with lock:
                     self.target_mm[axis] = None
-                self.pid_controllers[axis].reset()  # 清空积分项
+                self.pid_controllers[axis].reset()
                 continue
-            #PID
-            pid = self.pid_controllers[axis]
-            speed = int(pid.compute(error))
-            #P
-            # speed = int(max(min(error * self.speed_gain, self.speed_max), -self.speed_max))
-
+            speed = int(self.pid_controllers[axis].compute(error))
             self.write_speed(axis, speed)
             time.sleep(0.01)
 
@@ -234,7 +213,7 @@ class LineModuleController(Node):
         y = self.get_position_mm('ay')
         z = self.get_position_mm('az')
         msg = String()
-        msg.data = f"直线模组A三轴位置为：[x={x:.2f}, y={y:.2f}, z={z:.2f}] mm"
+        msg.data = f"模组A位置：[x={x:.2f}, y={y:.2f}, z={z:.2f}] mm"
         self.pub_position_string.publish(msg)
 
     def close(self):
@@ -242,10 +221,9 @@ class LineModuleController(Node):
             if client:
                 client.close()
 
-
 def main(args=None):
     rclpy.init(args=args)
-    node = LineModuleController()
+    node = LineModuleAController()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

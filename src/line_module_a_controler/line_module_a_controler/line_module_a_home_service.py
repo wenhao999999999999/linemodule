@@ -6,7 +6,7 @@ import time
 import threading
 
 
-class LineModuleHomeService(Node):
+class LineModuleAHomeService(Node):
     def __init__(self):
         super().__init__('line_module_home_service')
 
